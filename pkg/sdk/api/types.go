@@ -42,3 +42,15 @@ type Status struct {
 	// The observed version of the resource
 	ObservedVersion string `json:"observedVersion,omitempty" optional:"true"`
 }
+
+// DeepCopyInto is copying the receiver, writing into out. in must be non-nil.
+func (in *Status) DeepCopyInto(out *Status) {
+	*out = *in
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]conditions.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
