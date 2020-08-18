@@ -52,12 +52,8 @@ type Reconciler struct {
 }
 
 type CrCrud interface {
-	Create() runtime.Object
-	Update(object runtime.Object) error
-	Get(name types.NamespacedName) (controllerutil.Object, error)
+	Create() controllerutil.Object
 	Status(object runtime.Object) *sdkapi.Status
-	GetFinalizers(object runtime.Object) []string
-	SetFinalizers(object runtime.Object, finalizers []string)
 }
 
 type ResourcesProvider interface {
@@ -118,7 +114,7 @@ func (r *Reconciler) SetController(controller controller.Controller) {
 func (r *Reconciler) Reconcile(request reconcile.Request, operatorVersion string, reqLogger logr.Logger) (reconcile.Result, error) {
 	// Fetch the CDI instance
 	// check at cluster level
-	cr, err := r.crManager.Get(request.NamespacedName)
+	cr, err := r.Get(request.NamespacedName)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -422,9 +418,18 @@ func (r *Reconciler) completeUpgrade(logger logr.Logger, cr controllerutil.Objec
 // CrUpdate sets given phase on the CR and updates it in the cluster
 func (r *Reconciler) CrUpdate(phase sdkapi.Phase, cr runtime.Object) error {
 	r.crManager.Status(cr).Phase = phase
-	return r.crManager.Update(cr)
+	return r.client.Update(context.TODO(), cr)
 }
 
+// Get retrieves CR identified by the given name
+func (r *Reconciler) Get(name types.NamespacedName) (controllerutil.Object, error) {
+	cr := r.crManager.Create()
+	crKey := client.ObjectKey{Namespace: "", Name: name.Name}
+	err := r.client.Get(context.TODO(), crKey, cr)
+	return cr, err
+}
+
+// CrSetVersion sets version and phase on the CR object
 func (r *Reconciler) CrSetVersion(cr runtime.Object, version string) error {
 	phase := sdkapi.PhaseDeployed
 	if version == "" {
