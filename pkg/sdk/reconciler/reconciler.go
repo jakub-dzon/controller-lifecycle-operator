@@ -72,6 +72,7 @@ type PerishablesSynchronizer interface {
 type ConfigurationManager interface {
 	CreateOperatorConfig(cr controllerutil.Object) error
 	IsOperatorConfigMissing() (bool, error)
+	UpdateConfiguration(cr controllerutil.Object) error
 }
 
 type CRSanityChecker interface {
@@ -204,6 +205,11 @@ func (r *Reconciler) ReconcileCreate(logger logr.Logger, cr controllerutil.Objec
 // ReconcileUpdate executes Update operation
 func (r *Reconciler) ReconcileUpdate(logger logr.Logger, cr controllerutil.Object, operatorVersion string) (reconcile.Result, error) {
 	if err := r.CheckUpgrade(logger, cr, operatorVersion); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	if err := r.crManager.UpdateConfiguration(cr); err != nil {
+		logger.Error(err, "Error while customizing controller configuration")
 		return reconcile.Result{}, err
 	}
 
