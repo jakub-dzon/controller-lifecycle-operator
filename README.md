@@ -1,1 +1,1 @@
-# controller-lifecycle-operator
+# controller-lifecycle-operator-sdk
