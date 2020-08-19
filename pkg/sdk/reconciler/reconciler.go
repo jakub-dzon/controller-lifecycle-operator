@@ -30,6 +30,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
+// PerishablesSynchronizer is expected to execute perishable resources (i.e. certificates) synchronization if required
+type PerishablesSynchronizer func() error
+
+// ControllerConfigUpdater is expected to update controller configuration if required
+type ControllerConfigUpdater func(cr controllerutil.Object) error
+
+// SanityChecker is expected to check if it makes sense to execute the reconciliation if required
+type SanityChecker func(cr controllerutil.Object, logger logr.Logger) (*reconcile.Result, error)
+
+// WatchRegistrator is expected to register additional resource watchers if required
+type WatchRegistrator func() error
+
+//PreCreateHook is expected to perform custom actions before the creation of the managed resources is initiated
+type PreCreateHook func(cr controllerutil.Object) error
+
+// CrManager defines interface that needs to be provided for the reconciler to operate
+type CrManager interface {
+	// IsCreating checks whether creation of the managed resources will be executed
+	IsCreating(cr controllerutil.Object) (bool, error)
+	// Creates empty CR
+	Create() controllerutil.Object
+	// Status extracts status from the cr
+	Status(cr runtime.Object) *sdkapi.Status
+	// GetAllResources provides all resources managed by the cr
+	GetAllResources(cr runtime.Object) ([]runtime.Object, error)
+	// GetDependantResourcesListObjects returns resource list objects of dependant resources
+	GetDependantResourcesListObjects() []runtime.Object
+}
+
 // Reconciler is responsible for performing deployment reconciliation
 type Reconciler struct {
 	crManager CrManager
@@ -49,67 +78,13 @@ type Reconciler struct {
 	scheme                      *runtime.Scheme
 	perishablesSyncInterval     time.Duration
 	finalizerName               string
-}
 
-type CrCrud interface {
-	IsCreating(cr controllerutil.Object) (bool, error)
-	PreCreate(cr controllerutil.Object) error
-	Create() controllerutil.Object
-	Status(object runtime.Object) *sdkapi.Status
-}
-
-type ResourcesProvider interface {
-	GetAllResources(cr runtime.Object) ([]runtime.Object, error)
-	GetDependantResourcesListObjects() []runtime.Object
-}
-
-type WatchRegistrator interface {
-	Watch() error
-}
-
-type PerishablesSynchronizer interface {
-	Sync() error
-}
-
-type ConfigurationManager interface {
-	CreateOperatorConfig(cr controllerutil.Object) error
-	UpdateConfiguration(cr controllerutil.Object) error
-}
-
-type CRSanityChecker interface {
-	SanityCheck(cr controllerutil.Object, reqLogger logr.Logger) (*reconcile.Result, error)
-}
-
-// CrManager defines interface that needs to be provided for the reconciler to operate
-type CrManager interface {
-	CrCrud
-	ResourcesProvider
-	WatchRegistrator
-	PerishablesSynchronizer
-	ConfigurationManager
-	CRSanityChecker
-}
-
-// NewReconciler creates new Reconciler instance configured with given parameters
-func NewReconciler(crManager CrManager, log logr.Logger, client client.Client, callbackDispatcher *sdk.CallbackDispatcher, scheme *runtime.Scheme, createVersionLabel string, updateVersionLabel string, lastAppliedConfigAnnotation string, perishablesSyncInterval time.Duration, finalizerName string) *Reconciler {
-	return &Reconciler{
-		crManager:                   crManager,
-		watching:                    true,
-		log:                         log,
-		client:                      client,
-		callbackDispatcher:          callbackDispatcher,
-		scheme:                      scheme,
-		createVersionLabel:          createVersionLabel,
-		updateVersionLabel:          updateVersionLabel,
-		lastAppliedConfigAnnotation: lastAppliedConfigAnnotation,
-		perishablesSyncInterval:     perishablesSyncInterval,
-		finalizerName:               finalizerName,
-	}
-}
-
-// SetController sets controller
-func (r *Reconciler) SetController(controller controller.Controller) {
-	r.controller = controller
+	// Hooks
+	syncPerishables               PerishablesSynchronizer
+	updateControllerConfiguration ControllerConfigUpdater
+	checkSanity                   SanityChecker
+	watch                         WatchRegistrator
+	preCreate                     PreCreateHook
 }
 
 // Reconcile performs request reconciliation
@@ -160,7 +135,7 @@ func (r *Reconciler) Reconcile(request reconcile.Request, operatorVersion string
 			return reconcile.Result{RequeueAfter: time.Second}, nil
 		}
 		reqLogger.Info("Doing reconcile create")
-		if err := r.crManager.PreCreate(cr); err != nil {
+		if err := r.preCreate(cr); err != nil {
 			return reconcile.Result{}, err
 		}
 		reqLogger.Info("Pre-create hook executed successfully")
@@ -176,7 +151,7 @@ func (r *Reconciler) Reconcile(request reconcile.Request, operatorVersion string
 	}
 
 	// do we even care about this CR?
-	result, err := r.crManager.SanityCheck(cr, reqLogger)
+	result, err := r.checkSanity(cr, reqLogger)
 	if result != nil {
 		return *result, err
 	}
@@ -200,7 +175,7 @@ func (r *Reconciler) ReconcileUpdate(logger logr.Logger, cr controllerutil.Objec
 		return reconcile.Result{}, err
 	}
 
-	if err := r.crManager.UpdateConfiguration(cr); err != nil {
+	if err := r.updateControllerConfiguration(cr); err != nil {
 		logger.Error(err, "Error while customizing controller configuration")
 		return reconcile.Result{}, err
 	}
@@ -314,7 +289,7 @@ func (r *Reconciler) ReconcileUpdate(logger logr.Logger, cr controllerutil.Objec
 		}
 	}
 
-	if err = r.crManager.Sync(); err != nil {
+	if err = r.syncPerishables(); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -471,7 +446,7 @@ func (r *Reconciler) WatchDependantResources(cr runtime.Object) error {
 		return err
 	}
 
-	if err = r.crManager.Watch(); err != nil {
+	if err = r.watch(); err != nil {
 		return err
 	}
 
