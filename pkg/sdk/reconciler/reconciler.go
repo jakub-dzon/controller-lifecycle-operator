@@ -52,6 +52,8 @@ type Reconciler struct {
 }
 
 type CrCrud interface {
+	IsCreating(cr controllerutil.Object) (bool, error)
+	PreCreate(cr controllerutil.Object) error
 	Create() controllerutil.Object
 	Status(object runtime.Object) *sdkapi.Status
 }
@@ -71,7 +73,6 @@ type PerishablesSynchronizer interface {
 
 type ConfigurationManager interface {
 	CreateOperatorConfig(cr controllerutil.Object) error
-	IsOperatorConfigMissing() (bool, error)
 	UpdateConfiguration(cr controllerutil.Object) error
 }
 
@@ -113,7 +114,7 @@ func (r *Reconciler) SetController(controller controller.Controller) {
 
 // Reconcile performs request reconciliation
 func (r *Reconciler) Reconcile(request reconcile.Request, operatorVersion string, reqLogger logr.Logger) (reconcile.Result, error) {
-	// Fetch the CDI instance
+	// Fetch the CR instance
 	// check at cluster level
 	cr, err := r.Get(request.NamespacedName)
 	if err != nil {
@@ -138,16 +139,16 @@ func (r *Reconciler) Reconcile(request reconcile.Request, operatorVersion string
 	}
 
 	status := r.status(cr)
-	configMissing, err := r.crManager.IsOperatorConfigMissing()
+	creating, err := r.crManager.IsCreating(cr)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	if configMissing {
+	if creating {
 		if status.Phase != "" {
-			reqLogger.Info("Reconciling to error state, no configmap")
+			reqLogger.Info("Reconciling to error state, illegal phase", "phase", status.Phase)
 			// we are in a weird state
-			return r.ReconcileError(cr, "Reconciling to error state, no configmap")
+			return r.ReconcileError(cr, "Reconciling to error state, illegal phase")
 		}
 
 		haveOrphans, err := r.CheckForOrphans(reqLogger, cr)
@@ -159,7 +160,19 @@ func (r *Reconciler) Reconcile(request reconcile.Request, operatorVersion string
 			return reconcile.Result{RequeueAfter: time.Second}, nil
 		}
 		reqLogger.Info("Doing reconcile create")
-		return r.ReconcileCreate(reqLogger, cr, operatorVersion)
+		if err := r.crManager.PreCreate(cr); err != nil {
+			return reconcile.Result{}, err
+		}
+		reqLogger.Info("Pre-create hook executed successfully")
+
+		status := r.crManager.Status(cr)
+		sdk.MarkCrDeploying(status, "DeployStarted", "Started Deployment")
+
+		if err := r.CrInit(cr, operatorVersion); err != nil {
+			return reconcile.Result{}, err
+		}
+
+		reqLogger.Info("Successfully entered Deploying state")
 	}
 
 	// do we even care about this CR?
@@ -179,27 +192,6 @@ func (r *Reconciler) Reconcile(request reconcile.Request, operatorVersion string
 	}
 
 	return res, err
-}
-
-// ReconcileCreate performes Create operation
-func (r *Reconciler) ReconcileCreate(logger logr.Logger, cr controllerutil.Object, operatorVersion string) (reconcile.Result, error) {
-	// claim the configmap
-	if err := r.crManager.CreateOperatorConfig(cr); err != nil {
-		return reconcile.Result{}, err
-	}
-
-	logger.Info("ConfigMap created successfully")
-
-	status := r.status(cr)
-	sdk.MarkCrDeploying(status, "DeployStarted", "Started Deployment")
-
-	if err := r.CrInit(cr, operatorVersion); err != nil {
-		return reconcile.Result{}, err
-	}
-
-	logger.Info("Successfully entered Deploying state")
-
-	return r.ReconcileUpdate(logger, cr, operatorVersion)
 }
 
 // ReconcileUpdate executes Update operation
