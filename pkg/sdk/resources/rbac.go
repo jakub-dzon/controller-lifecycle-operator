@@ -1,6 +1,7 @@
 package resources
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -72,6 +73,35 @@ func (b *ResourceBuilder) CreateClusterRoleBinding(name, roleRef, serviceAccount
 // CreateOperatorClusterRoleBinding creates operator cluster role binding
 func (b *ResourceBuilder) CreateOperatorClusterRoleBinding(name, roleRef, serviceAccount, serviceAccountNamespace string) *rbacv1.ClusterRoleBinding {
 	return CreateClusterRoleBinding(name, roleRef, serviceAccount, serviceAccountNamespace, b.WithOperatorLabels(nil))
+}
+
+// CreateServiceAccount creates service account
+func (b *ResourceBuilder) CreateServiceAccount(name string) *corev1.ServiceAccount {
+	return &corev1.ServiceAccount{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ServiceAccount",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: b.WithCommonLabels(nil),
+		},
+	}
+}
+
+// CreateOperatorServiceAccount creates service account
+func (b *ResourceBuilder) CreateOperatorServiceAccount(name, namespace string) *corev1.ServiceAccount {
+	return &corev1.ServiceAccount{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ServiceAccount",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    b.WithOperatorLabels(nil),
+		},
+	}
 }
 
 // CreateClusterRoleBinding creates cluster role binding

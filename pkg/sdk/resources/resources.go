@@ -55,37 +55,8 @@ func (b *ResourceBuilder) WithOperatorLabels(labels map[string]string) map[strin
 	return labels
 }
 
-// CreateServiceAccount creates service account
-func (b *ResourceBuilder) CreateServiceAccount(name string) *corev1.ServiceAccount {
-	return &corev1.ServiceAccount{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "ServiceAccount",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
-			Labels: b.WithCommonLabels(nil),
-		},
-	}
-}
-
-// CreateOperatorServiceAccount creates service account
-func (b *ResourceBuilder) CreateOperatorServiceAccount(name, namespace string) *corev1.ServiceAccount {
-	return &corev1.ServiceAccount{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "ServiceAccount",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    b.WithOperatorLabels(nil),
-		},
-	}
-}
-
 // CreateOperatorDeploymentSpec creates deployment
-func (b *ResourceBuilder) CreateOperatorDeploymentSpec(name, matchKey, matchValue, serviceAccount string, numReplicas int32) *appsv1.DeploymentSpec {
+func (b *ResourceBuilder) CreateOperatorDeploymentSpec(matchKey, matchValue, serviceAccount string, numReplicas int32) *appsv1.DeploymentSpec {
 	matchMap := map[string]string{matchKey: matchValue}
 	spec := &appsv1.DeploymentSpec{
 		Replicas: &numReplicas,
@@ -122,7 +93,7 @@ func (b *ResourceBuilder) CreateOperatorDeployment(name, namespace, matchKey, ma
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: *b.CreateOperatorDeploymentSpec(name, matchKey, matchValue, serviceAccount, numReplicas),
+		Spec: *b.CreateOperatorDeploymentSpec(matchKey, matchValue, serviceAccount, numReplicas),
 	}
 	if serviceAccount != "" {
 		deployment.Spec.Template.Spec.ServiceAccountName = serviceAccount
@@ -168,8 +139,8 @@ func (b *ResourceBuilder) CreateDeployment(name, matchKey, matchValue, serviceAc
 }
 
 // CreatePortsContainer creates container
-func (b *ResourceBuilder) CreatePortsContainer(name, image, verbosity string, pullPolicy corev1.PullPolicy, ports *[]corev1.ContainerPort) corev1.Container {
-	return corev1.Container{
+func (b *ResourceBuilder) CreatePortsContainer(name, image, verbosity string, pullPolicy corev1.PullPolicy, ports *[]corev1.ContainerPort) *corev1.Container {
+	return &corev1.Container{
 		Name:            name,
 		Image:           image,
 		Ports:           *ports,
@@ -179,8 +150,8 @@ func (b *ResourceBuilder) CreatePortsContainer(name, image, verbosity string, pu
 }
 
 // CreateContainer creates container
-func (b *ResourceBuilder) CreateContainer(name, image, verbosity string, pullPolicy corev1.PullPolicy) corev1.Container {
-	return corev1.Container{
+func (b *ResourceBuilder) CreateContainer(name, image, verbosity string, pullPolicy corev1.PullPolicy) *corev1.Container {
+	return &corev1.Container{
 		Name:                     name,
 		Image:                    image,
 		ImagePullPolicy:          pullPolicy,
@@ -205,6 +176,36 @@ func (b *ResourceBuilder) CreateService(name, matchKey, matchValue string) *core
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: matchMap,
+		},
+	}
+}
+
+// CreateSecret creates secret
+func (b *ResourceBuilder) CreateSecret(name string) *corev1.Secret {
+	return CreateSecret(name, b.WithCommonLabels(nil))
+}
+
+// CreateConfigMap creates config map
+func (b *ResourceBuilder) CreateConfigMap(name string) *corev1.ConfigMap {
+	return CreateConfigMap(name, b.WithCommonLabels(nil))
+}
+
+// CreateSecret creates secret
+func CreateSecret(name string, labels map[string]string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+	}
+}
+
+// CreateConfigMap creates config map
+func CreateConfigMap(name string, labels map[string]string) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
 		},
 	}
 }
