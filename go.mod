@@ -51,5 +51,6 @@ replace (
 	k8s.io/sample-controller => k8s.io/sample-controller v0.18.6
 
 	sigs.k8s.io/structured-merge-diff => sigs.k8s.io/structured-merge-diff v1.0.0
+
 	vbom.ml/util => github.com/fvbommel/util v0.0.0-20180919145318-efcd4e0f9787
 )
