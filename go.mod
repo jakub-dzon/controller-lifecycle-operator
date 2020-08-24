@@ -15,6 +15,7 @@ require (
 	go.uber.org/multierr v1.3.0 // indirect
 	golang.org/x/tools v0.0.0-20200115044656-831fdb1e1868 // indirect
 	k8s.io/api v0.18.6
+	k8s.io/apiextensions-apiserver v0.18.6
 	k8s.io/apimachinery v0.18.6
 	k8s.io/client-go v8.0.0+incompatible // indirect
 	k8s.io/kubernetes v1.14.0
