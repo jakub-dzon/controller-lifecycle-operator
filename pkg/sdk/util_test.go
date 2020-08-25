@@ -19,9 +19,14 @@ package sdk
 import (
 	"reflect"
 
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	v1 "k8s.io/api/apps/v1"
+
 	"k8s.io/kubernetes/pkg/apis/core"
 
 	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -86,14 +91,39 @@ var _ = Describe("StripStatusFromObject", func() {
 		Expect(reflect.DeepEqual(out, in)).To(BeTrue())
 	})
 
+	DescribeTable("Should strip object status", func(in, expected controllerutil.Object) {
+
+		out, err := StripStatusFromObject(in)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(reflect.DeepEqual(out, in)).To(BeFalse())
+		Expect(reflect.DeepEqual(out, expected)).To(BeTrue())
+	},
+		Entry("status@Deployment",
+			&v1.Deployment{
+				Status: v1.DeploymentStatus{
+					Replicas: 128,
+				},
+			},
+			&v1.Deployment{Status: v1.DeploymentStatus{}},
+		),
+		Entry("Status@Pod",
+			&core.Pod{
+				Status: core.PodStatus{
+					PodIP: "pod-ip",
+				},
+			},
+			&core.Pod{Status: core.PodStatus{}},
+		),
+	)
+
 	It("Should strip object status", func() {
-		in := &core.Pod{
-			Status: core.PodStatus{
-				PodIP: "pod-ip",
+		in := &v1.Deployment{
+			Status: v1.DeploymentStatus{
+				Replicas: 128,
 			},
 		}
-		expected := &core.Pod{
-			Status: core.PodStatus{},
+		expected := &v1.Deployment{
+			Status: v1.DeploymentStatus{},
 		}
 		out, err := StripStatusFromObject(in.DeepCopyObject())
 		Expect(err).ToNot(HaveOccurred())

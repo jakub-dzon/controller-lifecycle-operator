@@ -18,11 +18,12 @@ package sdk
 
 import (
 	"encoding/json"
-	"k8s.io/api/core/v1"
 	"os"
 	"reflect"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"strings"
+
+	v1 "k8s.io/api/core/v1"
+	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 
 	jsondiff "github.com/appscode/jsonpatch"
 	jsonpatch "github.com/evanphx/json-patch"
@@ -35,6 +36,7 @@ import (
 )
 
 const statusKey = "status"
+const capitalStatusKey = "Status"
 
 var log = logf.Log.WithName("sdk")
 
@@ -128,6 +130,9 @@ func StripStatusByte(in []byte) ([]byte, error) {
 
 	if _, ok := result[statusKey]; ok {
 		delete(result, statusKey)
+	}
+	if _, ok := result[capitalStatusKey]; ok {
+		delete(result, capitalStatusKey)
 	}
 	return json.Marshal(result)
 }
