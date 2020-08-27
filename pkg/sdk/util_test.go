@@ -19,6 +19,8 @@ package sdk
 import (
 	"reflect"
 
+	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1 "k8s.io/api/apps/v1"
@@ -31,6 +33,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+const lastsAppliedConfigurationAnnotation = "lastAppliedConfiguration"
 
 var _ = Describe("MergeLabelsAndAnnotations", func() {
 	It("Should properly merge labels and annotations, if no dest labels/anns", func() {
@@ -80,6 +84,65 @@ var _ = Describe("MergeLabelsAndAnnotations", func() {
 		Expect(dest.GetLabels()["l1"]).To(Equal("test"))
 		Expect(dest.GetLabels()["l2"]).To(Equal("test2"))
 		Expect(dest.GetAnnotations()["a1"]).To(Equal("ann"))
+	})
+
+	// TODO: fix the problem with preserving unknown fields
+	PIt("will not merge CRD correctly", func() {
+		obj1 := &extv1.CustomResourceDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "obj",
+			},
+			Spec: extv1.CustomResourceDefinitionSpec{
+				Group: "foo",
+			},
+		}
+
+		err := SetLastAppliedConfiguration(obj1, lastsAppliedConfigurationAnnotation)
+		Expect(err).ToNot(HaveOccurred())
+
+		obj2 := obj1.DeepCopy()
+		obj2.Spec.PreserveUnknownFields = true
+
+		obj3 := obj1.DeepCopy()
+		// not necessary but let's be explicit
+		obj3.Spec.PreserveUnknownFields = false
+		err = SetLastAppliedConfiguration(obj3, lastsAppliedConfigurationAnnotation)
+		Expect(err).ToNot(HaveOccurred())
+
+		obj4, err := MergeObject(obj3, obj2, lastsAppliedConfigurationAnnotation)
+		Expect(err).ToNot(HaveOccurred())
+
+		crd := obj4.(*extv1.CustomResourceDefinition)
+		Expect(crd.Spec.PreserveUnknownFields).To(BeFalse())
+	})
+
+	It("will merge CRD correctly", func() {
+		obj1 := &extv1.CustomResourceDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "obj",
+			},
+			Spec: extv1.CustomResourceDefinitionSpec{
+				Group:                 "foo",
+				PreserveUnknownFields: true,
+			},
+		}
+
+		err := SetLastAppliedConfiguration(obj1, lastsAppliedConfigurationAnnotation)
+		Expect(err).ToNot(HaveOccurred())
+
+		obj2 := obj1.DeepCopy()
+
+		obj3 := obj1.DeepCopy()
+		// not necessary but let's be explicit
+		obj3.Spec.PreserveUnknownFields = false
+		err = SetLastAppliedConfiguration(obj3, lastsAppliedConfigurationAnnotation)
+		Expect(err).ToNot(HaveOccurred())
+
+		obj4, err := MergeObject(obj3, obj2, lastsAppliedConfigurationAnnotation)
+		Expect(err).ToNot(HaveOccurred())
+
+		crd := obj4.(*extv1.CustomResourceDefinition)
+		Expect(crd.Spec.PreserveUnknownFields).To(BeFalse())
 	})
 })
 

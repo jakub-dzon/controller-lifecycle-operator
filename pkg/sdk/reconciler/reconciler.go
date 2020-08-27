@@ -2,11 +2,12 @@ package reconciler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/jakub-dzon/controller-lifecycle-operator-sdk/pkg/sdk/callbacks"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -59,6 +60,15 @@ type CrManager interface {
 	GetDependantResourcesListObjects() []runtime.Object
 }
 
+// CallbackDispatcher manages and executes resource callbacks
+type CallbackDispatcher interface {
+	// AddCallback registers a callback for given object type
+	AddCallback(runtime.Object, callbacks.ReconcileCallback)
+
+	// InvokeCallbacks executes callbacks for desired/current object type
+	InvokeCallbacks(l logr.Logger, cr interface{}, s callbacks.ReconcileState, desiredObj, currentObj runtime.Object) error
+}
+
 // Reconciler is responsible for performing deployment reconciliation
 type Reconciler struct {
 	crManager CrManager
@@ -71,7 +81,7 @@ type Reconciler struct {
 
 	client client.Client
 
-	callbackDispatcher          *sdk.CallbackDispatcher
+	callbackDispatcher          CallbackDispatcher
 	createVersionLabel          string
 	lastAppliedConfigAnnotation string
 	updateVersionLabel          string
@@ -91,7 +101,7 @@ type Reconciler struct {
 func (r *Reconciler) Reconcile(request reconcile.Request, operatorVersion string, reqLogger logr.Logger) (reconcile.Result, error) {
 	// Fetch the CR instance
 	// check at cluster level
-	cr, err := r.Get(request.NamespacedName)
+	cr, err := r.getCr(request.NamespacedName)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -209,7 +219,7 @@ func (r *Reconciler) ReconcileUpdate(logger logr.Logger, cr controllerutil.Objec
 			}
 
 			// PRE_CREATE callback
-			if err = r.InvokeCallbacks(logger, cr, sdk.ReconcileStatePreCreate, desiredRuntimeObj, nil); err != nil {
+			if err = r.InvokeCallbacks(logger, cr, callbacks.ReconcileStatePreCreate, desiredRuntimeObj, nil); err != nil {
 				return reconcile.Result{}, err
 			}
 
@@ -221,7 +231,7 @@ func (r *Reconciler) ReconcileUpdate(logger logr.Logger, cr controllerutil.Objec
 			}
 
 			// POST_CREATE callback
-			if err = r.InvokeCallbacks(logger, cr, sdk.ReconcileStatePostCreate, desiredRuntimeObj, nil); err != nil {
+			if err = r.InvokeCallbacks(logger, cr, callbacks.ReconcileStatePostCreate, desiredRuntimeObj, nil); err != nil {
 				return reconcile.Result{}, err
 			}
 
@@ -231,7 +241,7 @@ func (r *Reconciler) ReconcileUpdate(logger logr.Logger, cr controllerutil.Objec
 				"type", fmt.Sprintf("%T", desiredMetaObj))
 		} else {
 			// POST_READ callback
-			if err = r.InvokeCallbacks(logger, cr, sdk.ReconcileStatePostRead, desiredRuntimeObj, currentRuntimeObj); err != nil {
+			if err = r.InvokeCallbacks(logger, cr, callbacks.ReconcileStatePostRead, desiredRuntimeObj, currentRuntimeObj); err != nil {
 				return reconcile.Result{}, err
 			}
 
@@ -261,7 +271,7 @@ func (r *Reconciler) ReconcileUpdate(logger logr.Logger, cr controllerutil.Objec
 				sdk.SetLabel(r.updateVersionLabel, operatorVersion, currentMetaObj)
 
 				// PRE_UPDATE callback
-				if err = r.InvokeCallbacks(logger, cr, sdk.ReconcileStatePreUpdate, desiredRuntimeObj, currentRuntimeObj); err != nil {
+				if err = r.InvokeCallbacks(logger, cr, callbacks.ReconcileStatePreUpdate, desiredRuntimeObj, currentRuntimeObj); err != nil {
 					return reconcile.Result{}, err
 				}
 
@@ -272,7 +282,7 @@ func (r *Reconciler) ReconcileUpdate(logger logr.Logger, cr controllerutil.Objec
 				}
 
 				// POST_UPDATE callback
-				if err = r.InvokeCallbacks(logger, cr, sdk.ReconcileStatePostUpdate, desiredRuntimeObj, nil); err != nil {
+				if err = r.InvokeCallbacks(logger, cr, callbacks.ReconcileStatePostUpdate, desiredRuntimeObj, nil); err != nil {
 					return reconcile.Result{}, err
 				}
 
@@ -354,52 +364,10 @@ func (r *Reconciler) CheckForOrphans(logger logr.Logger, cr runtime.Object) (boo
 	return false, nil
 }
 
-func (r *Reconciler) setLastAppliedConfiguration(obj metav1.Object) error {
-	bytes, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-
-	if obj.GetAnnotations() == nil {
-		obj.SetAnnotations(make(map[string]string))
-	}
-
-	obj.GetAnnotations()[r.lastAppliedConfigAnnotation] = string(bytes)
-
-	return nil
-}
-
-func (r *Reconciler) completeUpgrade(logger logr.Logger, cr controllerutil.Object, operatorVersion string) error {
-	if err := r.CleanupUnusedResources(logger, cr); err != nil {
-		return err
-	}
-
-	status := r.status(cr)
-	previousVersion := status.ObservedVersion
-	status.ObservedVersion = operatorVersion
-
-	sdk.MarkCrHealthyMessage(status, "DeployCompleted", "Deployment Completed")
-	if err := r.CrUpdate(sdkapi.PhaseDeployed, cr); err != nil {
-		return err
-	}
-
-	logger.Info("Successfully finished Upgrade and entered Deployed state", "from version", previousVersion, "to version", status.ObservedVersion)
-
-	return nil
-}
-
 // CrUpdate sets given phase on the CR and updates it in the cluster
 func (r *Reconciler) CrUpdate(phase sdkapi.Phase, cr runtime.Object) error {
 	r.crManager.Status(cr).Phase = phase
 	return r.client.Update(context.TODO(), cr)
-}
-
-// Get retrieves CR identified by the given name
-func (r *Reconciler) Get(name types.NamespacedName) (controllerutil.Object, error) {
-	cr := r.crManager.Create()
-	crKey := client.ObjectKey{Namespace: "", Name: name.Name}
-	err := r.client.Get(context.TODO(), crKey, cr)
-	return cr, err
 }
 
 // CrSetVersion sets version and phase on the CR object
@@ -422,10 +390,6 @@ func (r *Reconciler) CrError(cr runtime.Object) error {
 		return r.CrUpdate(sdkapi.PhaseError, cr)
 	}
 	return nil
-}
-
-func (r *Reconciler) status(object runtime.Object) *sdkapi.Status {
-	return r.crManager.Status(object)
 }
 
 // WatchDependantResources registers watches for dependant resource types
@@ -519,7 +483,7 @@ func (r *Reconciler) InvokeDeleteCallbacks(logger logr.Logger, cr runtime.Object
 	}
 
 	for _, desiredObj := range desiredResources {
-		if err = r.InvokeCallbacks(logger, cr, sdk.ReconcileStateOperatorDelete, desiredObj, nil); err != nil {
+		if err = r.InvokeCallbacks(logger, cr, callbacks.ReconcileStateOperatorDelete, desiredObj, nil); err != nil {
 			return err
 		}
 	}
@@ -552,7 +516,7 @@ func (r *Reconciler) WatchCR() error {
 }
 
 // InvokeCallbacks executes callbacks registered
-func (r *Reconciler) InvokeCallbacks(l logr.Logger, cr runtime.Object, s sdk.ReconcileState, desiredObj, currentObj runtime.Object) error {
+func (r *Reconciler) InvokeCallbacks(l logr.Logger, cr runtime.Object, s callbacks.ReconcileState, desiredObj, currentObj runtime.Object) error {
 	return r.callbackDispatcher.InvokeCallbacks(l, cr, s, desiredObj, currentObj)
 }
 
@@ -590,7 +554,7 @@ func (r *Reconciler) WatchResourceTypes(resources ...runtime.Object) error {
 }
 
 // AddCallback registers a callback for given object type
-func (r *Reconciler) AddCallback(obj runtime.Object, cb sdk.ReconcileCallback) {
+func (r *Reconciler) AddCallback(obj runtime.Object, cb callbacks.ReconcileCallback) {
 	r.callbackDispatcher.AddCallback(obj, cb)
 }
 
@@ -607,8 +571,9 @@ func (r *Reconciler) CheckUpgrade(logger logr.Logger, cr runtime.Object, targetV
 	}
 
 	deploying := status.Phase == sdkapi.PhaseDeploying
-	isUpgrade, err := sdk.ShouldTakeUpdatePath(logger, targetVersion, status.ObservedVersion, deploying)
+	isUpgrade, err := ShouldTakeUpdatePath(targetVersion, status.ObservedVersion, deploying)
 	if err != nil {
+		logger.Error(err, "", "current", status.ObservedVersion, "target", targetVersion)
 		return err
 	}
 
@@ -666,7 +631,7 @@ func (r *Reconciler) CleanupUnusedResources(logger logr.Logger, cr controlleruti
 
 			if !found && metav1.IsControlledBy(observedMetaObj, cr) {
 				//Invoke pre delete callback
-				if err = r.InvokeCallbacks(logger, cr, sdk.ReconcileStatePreDelete, nil, observedObj); err != nil {
+				if err = r.InvokeCallbacks(logger, cr, callbacks.ReconcileStatePreDelete, nil, observedObj); err != nil {
 					return err
 				}
 
@@ -679,7 +644,7 @@ func (r *Reconciler) CleanupUnusedResources(logger logr.Logger, cr controlleruti
 				}
 
 				//invoke post delete callback
-				if err = r.InvokeCallbacks(logger, cr, sdk.ReconcileStatePostDelete, nil, observedObj); err != nil {
+				if err = r.InvokeCallbacks(logger, cr, callbacks.ReconcileStatePostDelete, nil, observedObj); err != nil {
 					return err
 				}
 			}
@@ -736,4 +701,38 @@ func (r *Reconciler) CrInit(cr controllerutil.Object, operatorVersion string) er
 	status.TargetVersion = operatorVersion
 
 	return r.CrUpdate(sdkapi.PhaseDeploying, cr)
+}
+
+func (r *Reconciler) getCr(name types.NamespacedName) (controllerutil.Object, error) {
+	cr := r.crManager.Create()
+	crKey := client.ObjectKey{Namespace: "", Name: name.Name}
+	err := r.client.Get(context.TODO(), crKey, cr)
+	return cr, err
+}
+
+func (r *Reconciler) status(object runtime.Object) *sdkapi.Status {
+	return r.crManager.Status(object)
+}
+
+func (r *Reconciler) setLastAppliedConfiguration(obj metav1.Object) error {
+	return sdk.SetLastAppliedConfiguration(obj, r.lastAppliedConfigAnnotation)
+}
+
+func (r *Reconciler) completeUpgrade(logger logr.Logger, cr controllerutil.Object, operatorVersion string) error {
+	if err := r.CleanupUnusedResources(logger, cr); err != nil {
+		return err
+	}
+
+	status := r.status(cr)
+	previousVersion := status.ObservedVersion
+	status.ObservedVersion = operatorVersion
+
+	sdk.MarkCrHealthyMessage(status, "DeployCompleted", "Deployment Completed")
+	if err := r.CrUpdate(sdkapi.PhaseDeployed, cr); err != nil {
+		return err
+	}
+
+	logger.Info("Successfully finished Upgrade and entered Deployed state", "from version", previousVersion, "to version", status.ObservedVersion)
+
+	return nil
 }

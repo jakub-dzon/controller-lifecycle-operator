@@ -204,3 +204,19 @@ func SameResource(obj1, obj2 runtime.Object) bool {
 
 	return true
 }
+
+// SetLastAppliedConfiguration writes last applied configuration to given annotation
+func SetLastAppliedConfiguration(obj metav1.Object, lastAppliedConfigAnnotation string) error {
+	bytes, err := json.Marshal(obj)
+	if err != nil {
+		return err
+	}
+
+	if obj.GetAnnotations() == nil {
+		obj.SetAnnotations(make(map[string]string))
+	}
+
+	obj.GetAnnotations()[lastAppliedConfigAnnotation] = string(bytes)
+
+	return nil
+}

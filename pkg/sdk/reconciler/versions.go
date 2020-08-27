@@ -1,13 +1,14 @@
-package sdk
+package reconciler
 
 import (
 	"fmt"
-	"github.com/blang/semver"
-	"github.com/go-logr/logr"
 	"strings"
+
+	"github.com/blang/semver"
 )
 
-func ShouldTakeUpdatePath(logger logr.Logger, targetVersion, currentVersion string, deploying bool) (bool, error) {
+// ShouldTakeUpdatePath checks whether upgrade-type reconciliation should be executed. Returns error in case of downgrade
+func ShouldTakeUpdatePath(targetVersion, currentVersion string, deploying bool) (bool, error) {
 
 	if deploying {
 		return false, nil
@@ -37,7 +38,6 @@ func ShouldTakeUpdatePath(logger logr.Logger, targetVersion, currentVersion stri
 		if err == nil {
 			if target.Compare(current) < 0 {
 				err := fmt.Errorf("operator downgraded, will not reconcile")
-				logger.Error(err, "", "current", current, "target", target)
 				return false, err
 			} else if target.Compare(current) == 0 {
 				shouldTakeUpdatePath = false
@@ -47,4 +47,3 @@ func ShouldTakeUpdatePath(logger logr.Logger, targetVersion, currentVersion stri
 
 	return shouldTakeUpdatePath, nil
 }
-

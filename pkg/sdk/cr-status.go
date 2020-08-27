@@ -1,9 +1,9 @@
 package sdk
 
 import (
+	"github.com/jakub-dzon/controller-lifecycle-operator-sdk/pkg/sdk/api"
 	v1 "github.com/openshift/custom-resource-status/conditions/v1"
 	v12 "k8s.io/api/core/v1"
-	"github.com/jakub-dzon/controller-lifecycle-operator-sdk/pkg/sdk/api"
 )
 
 // IsUpgrading checks whether cr status represents upgrade in progress

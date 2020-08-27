@@ -14,11 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package sdk
+package callbacks
 
 import (
 	"context"
 	"reflect"
+
+	"github.com/jakub-dzon/controller-lifecycle-operator-sdk/pkg/sdk"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -128,7 +130,7 @@ func (cd *CallbackDispatcher) InvokeCallbacks(l logr.Logger, cr interface{}, s R
 				Name:      metaObj.GetName(),
 			}
 
-			currentObj = NewDefaultInstance(desiredObj)
+			currentObj = sdk.NewDefaultInstance(desiredObj)
 			if err := cd.client.Get(context.TODO(), key, currentObj); err != nil {
 				if !errors.IsNotFound(err) {
 					return err

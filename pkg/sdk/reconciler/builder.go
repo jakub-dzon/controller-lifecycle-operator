@@ -6,7 +6,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	"github.com/go-logr/logr"
-	"github.com/jakub-dzon/controller-lifecycle-operator-sdk/pkg/sdk"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -14,10 +13,9 @@ import (
 )
 
 // NewReconciler creates new Reconciler instance configured with given parameters
-func NewReconciler(crManager CrManager, log logr.Logger, client client.Client, callbackDispatcher *sdk.CallbackDispatcher, scheme *runtime.Scheme, createVersionLabel string, updateVersionLabel string, lastAppliedConfigAnnotation string, perishablesSyncInterval time.Duration, finalizerName string) *Reconciler {
+func NewReconciler(crManager CrManager, log logr.Logger, client client.Client, callbackDispatcher CallbackDispatcher, scheme *runtime.Scheme, createVersionLabel string, updateVersionLabel string, lastAppliedConfigAnnotation string, perishablesSyncInterval time.Duration, finalizerName string) *Reconciler {
 	return &Reconciler{
 		crManager:                     crManager,
-		watching:                      true,
 		log:                           log,
 		client:                        client,
 		callbackDispatcher:            callbackDispatcher,
@@ -38,6 +36,12 @@ func NewReconciler(crManager CrManager, log logr.Logger, client client.Client, c
 // WithController sets controller
 func (r *Reconciler) WithController(controller controller.Controller) *Reconciler {
 	r.controller = controller
+	return r
+}
+
+// WithWatching sets watching flag - for testing
+func (r *Reconciler) WithWatching(watching bool) *Reconciler {
+	r.watching = watching
 	return r
 }
 
